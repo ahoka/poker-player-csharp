@@ -9,19 +9,19 @@ using System.Collections.Concurrent;
 
 namespace Poker
 {
-    public class Player
+    public class PokerPlayer
     {
         readonly Thread dispatcherThread;
-        readonly BlockingCollection<object> queue;
+        //readonly BlockingCollection<object> queue;
         readonly HttpListener listener;
 
         bool IsRunning { get; set; }
 
-        public Player()
+        public PokerPlayer()
         {
             IsRunning = true;
 
-            queue = new BlockingCollection<object>();
+            //queue = new BlockingCollection<object>();
 
             listener = new HttpListener();
             listener.Prefixes.Add("http://localhost:9090/");
@@ -48,7 +48,17 @@ namespace Poker
         {
             while (IsRunning)
             {
-                var context = listener.GetContext();
+                HttpListenerContext context;
+                try
+                {
+                    context = listener.GetContext();
+                }
+                catch (ObjectDisposedException)
+                {
+
+                    Console.WriteLine("Object disposed...");
+                    return;
+                }
 
                 HandleRequest(context);
             }

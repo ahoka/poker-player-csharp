@@ -6,7 +6,7 @@ namespace Poker
     {
         public static void Main(string[] args)
         {
-            var player = new Player();
+            var player = new PokerPlayer();
             player.Start();
 
             Console.ReadLine();
