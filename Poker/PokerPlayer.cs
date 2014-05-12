@@ -1,69 +1,163 @@
-using System.Runtime.Serialization;
-using System.Collections.Generic;
-
 namespace Poker
 {
-    [DataContract]
-    public class GameState
+    using System;
+    using System.Net;
+    using System.IO;
+    using System.Runtime.Serialization.Json;
+    using System.Threading;
+    using System.Web;
+    using System.Collections.Specialized;
+
+    public class PokerPlayer
     {
-        [DataMember(Name = "small_blind")]
-        public uint SmallBind { get; set; }
+        readonly Thread dispatcherThread;
+        #if HAS_QUEUE
+        readonly BlockingCollection<object> queue;
+        #endif
+        readonly HttpListener listener;
 
-        [DataMember(Name = "current_buy_in")]
-        public uint CurrentBuyIn { get; set; }
+        public PokerPlayer()
+        {
+            IsRunning = true;
+            #if HAS_QUEUE
+            queue = new BlockingCollection<object>();
+            #endif
+            listener = new HttpListener();
+            listener.Prefixes.Add("http://localhost:9090/");
 
-        [DataMember(Name = "pot")]
-        public uint Pot { get; set; }
+            dispatcherThread = new Thread(DispatchRequest);
+        }
 
-        [DataMember(Name = "minimum_raise")]
-        public uint MinimumRaise { get; set; }
+        bool IsRunning { get; set; }
 
-        [DataMember(Name = "dealer")]
-        public uint Dealer { get; set; }
+        public void Start()
+        {
+            listener.Start();
 
-        [DataMember(Name = "orbits")]
-        public uint Orbits { get; set; }
+            dispatcherThread.Start();
+        }
 
-        [DataMember(Name = "in_action")]
-        public uint InAction { get; set; }
+        public void Stop()
+        {
+            listener.Stop();
 
-        [DataMember(Name = "players")]
-        public List<Player> Players { get; set; }
+            IsRunning = false;
+            dispatcherThread.Join();
+        }
 
-        [DataMember(Name = "community_cards")]
-        public List<Card> CommunityCards { get; set; }
-    }
+        static void HandleRequest(HttpListenerContext context)
+        {
+            if (!context.Request.HttpMethod.Equals("POST"))
+            {
+                HandleBadRequest(context);
+            }
+            else
+            {
+                var queryParams = HttpUtility.ParseQueryString(new StreamReader(context.Request.InputStream).ReadToEnd());
+                // TODO: dispatch these to worker thread        
+                switch (queryParams.Get("action"))
+                {
+                    case "check":
+                        HandleCheckRequest(context);
+                        break;
+                    case "version":
+                        HandleVersionRequest(context, GetGameState(queryParams.Get("game_state")));
+                        break;
+                    case "bet_request":
+                        HandleBetRequest(context, GetGameState(queryParams.Get("game_state")));
+                        break;
+                    case "showdown":
+                        HandleShowdownRequest(context, GetGameState(queryParams.Get("game_state")));
+                        break;
+                    default:
+                        HandleBadRequest(context);
+                        break;
+                }
+            }
+        }
 
-    [DataContract]
-    public class Player
-    {
-        [DataMember(Name = "id")]
-        public uint Id { get; set; }
+        static GameState GetGameState(string gameState)
+        {
+            var serializer = new DataContractJsonSerializer(typeof(GameState));
 
-        [DataMember(Name = "name")]
-        public string Name { get; set; }
+            try
+            {
+                var stream = new MemoryStream();
+                var writer = new StreamWriter(stream);
+                writer.Write(gameState);
+                writer.Flush();
+                stream.Position = 0;
+                return serializer.ReadObject(stream) as GameState;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.Message);
+                return null;
+            }
+        }
 
-        [DataMember(Name = "status")]
-        public string Status { get; set; }
+        static void HandleBadRequest(HttpListenerContext context)
+        {
+            Console.WriteLine("Bad request: " + context.Request.HttpMethod + " " + context.Request.Url.AbsolutePath);
+            context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+            context.Response.Close();
+        }
 
-        [DataMember(Name = "version")]
-        public string Version { get; set; }
+        static void HandleCheckRequest(HttpListenerContext context)
+        {
+            Console.WriteLine("CHECK REQUEST");
+            context.Response.StatusCode = (int)HttpStatusCode.OK;
+            context.Response.Close();
+        }
 
-        [DataMember(Name = "stack")]
-        public uint Stack { get; set; }
+        static void HandleVersionRequest(HttpListenerContext context, GameState gameState)
+        {
+            Console.WriteLine("VERSION REQUEST");
+            context.Response.StatusCode = (int)HttpStatusCode.OK;
+            var output = new StreamWriter(context.Response.OutputStream);
+            // TODO
+            output.WriteLine("VERSION GOES HERE");
+            output.Flush();
+            context.Response.Close();
+        }
 
-        [DataMember(Name = "bet")]
-        public uint Bet { get; set; }
-    }
+        static void HandleBetRequest(HttpListenerContext context, GameState gameState)
+        {
+            Console.WriteLine("BET REQUEST");
 
-    [DataContract]
-    public class Card
-    {
-        [DataMember(Name = "rank")]
-        public string Rank { get; set; }
+            Console.WriteLine(gameState);
 
-        [DataMember(Name = "suit")]
-        public string Suit { get; set; }
+            context.Response.StatusCode = (int)HttpStatusCode.OK;
+            context.Response.Close();
+        }
+
+        static void HandleShowdownRequest(HttpListenerContext context, GameState gameState)
+        {
+            Console.WriteLine("SHOWDOWN REQUEST");
+
+            Console.WriteLine(gameState);
+
+            context.Response.StatusCode = (int)HttpStatusCode.OK;
+            context.Response.Close();
+        }
+
+        void DispatchRequest()
+        {
+            while (IsRunning)
+            {
+                HttpListenerContext context;
+                try
+                {
+                    context = listener.GetContext();
+                }
+                catch (ObjectDisposedException)
+                {
+                    Console.WriteLine("Object disposed...");
+                    return;
+                }
+
+                HandleRequest(context);
+            }
+        }
     }
 }
-
